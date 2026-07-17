@@ -38,6 +38,11 @@ $formBlock = $formViewModel->getFormBlock($code);
 $method = $formBlock->getMethod();
 $config = $block->getConfig();
 $image = $config['logoImage'] ?? false;
+
+// Method active but unavailable (e.g. currency restriction): config is empty; render nothing.
+if (empty($config['publicKey'])) {
+    return;
+}
 ?>
 <div class="<?= /* @noEscape */ $code ?>"
      x-data="<?= /* @noEscape */ $code ?>PaymentForm"

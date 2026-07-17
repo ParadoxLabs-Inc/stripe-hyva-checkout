@@ -78,25 +78,30 @@ $inlineScript = <<<JS
                 this.config = JSON.parse(this.\$el.dataset.config);
                 this.selectedCard = this.config.selectedCard || '';
                 this.payment.card_id = this.selectedCard;
-                this.payment.save = this.config.forceSaveCard
-                                    || (this.config.canSaveCard && this.config.defaultSaveCard);
+                this.payment.save = this.config.canSaveCard
+                                    && (this.config.forceSaveCard || this.config.defaultSaveCard);
 
-                window.addEventListener(
-                    'checkout:validate:{$code}',
-                    this.validateAndTokenize.bind(this)
-                );
+                // Store bound refs globally and remove-before-add: if Magewire replaces the root
+                // node, a fresh Alpine instance initializes and a stale listener set would double
+                // (and double-settle) the shared validation promise.
+                const listeners = window['{$code}Listeners'] = window['{$code}Listeners'] || {};
+
+                window.removeEventListener('checkout:validate:{$code}', listeners.validate);
+                listeners.validate = this.validateAndTokenize.bind(this);
+                window.addEventListener('checkout:validate:{$code}', listeners.validate);
 
                 // Dispatched by the Hyva place-order service processor on any placement failure;
                 // a 3DS challenge arrives as a failure, so check for a pending next-action.
-                window.addEventListener(
-                    'order:place:{$code}:error',
-                    this.handleOrderError.bind(this)
-                );
+                window.removeEventListener('order:place:{$code}:error', listeners.orderError);
+                listeners.orderError = this.handleOrderError.bind(this);
+                window.addEventListener('order:place:{$code}:error', listeners.orderError);
 
                 // Quote data pushed by the Magewire component when the billing address changes.
-                this._boundQuoteUpdated = this.handleQuoteUpdated.bind(this);
-                document.addEventListener('{$code}QuoteUpdated', this._boundQuoteUpdated);
-                window.addEventListener('{$code}QuoteUpdated', this._boundQuoteUpdated);
+                document.removeEventListener('{$code}QuoteUpdated', listeners.quoteUpdated);
+                window.removeEventListener('{$code}QuoteUpdated', listeners.quoteUpdated);
+                listeners.quoteUpdated = this.handleQuoteUpdated.bind(this);
+                document.addEventListener('{$code}QuoteUpdated', listeners.quoteUpdated);
+                window.addEventListener('{$code}QuoteUpdated', listeners.quoteUpdated);
 
                 this.loadStripeJs();
 
@@ -118,6 +123,11 @@ $inlineScript = <<<JS
                 document.head.append(script);
             },
             initStripe: function() {
+                if (!this.config.publicKey) {
+                    // Method active but unavailable (e.g. currency restriction): config is empty.
+                    return;
+                }
+
                 this.stripe = Stripe(this.config.publicKey);
 
                 // Deferred Element (no intent/clientSecret up front): the intent is created and

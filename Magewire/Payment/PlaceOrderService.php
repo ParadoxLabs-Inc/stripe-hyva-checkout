@@ -50,8 +50,9 @@ class PlaceOrderService extends AbstractPlaceOrderService
      *
      * On a Stripe requires_action (3DS) result, Method::confirmFromToken() throws
      * StripeAuthenticationRequiredException; its generic message surfaces through the default
-     * handleException() rethrow, and the client recovers the challenge via the payment
-     * component's getNextAction() on the order:place error event.
+     * handleException() rethrow, StashNextActionPlugin persists the challenge data onto the
+     * quote payment, and the client recovers it via the payment component's getNextAction()
+     * on the order:place error event.
      *
      * @throws CouldNotSaveException
      * @throws \Magento\Framework\Exception\LocalizedException

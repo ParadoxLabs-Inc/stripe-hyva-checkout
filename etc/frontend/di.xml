@@ -6,6 +6,10 @@
         </arguments>
     </type>
 
+    <type name="ParadoxLabs\StripeHyvaCheckout\Magewire\Payment\PlaceOrderService">
+        <plugin name="paradoxlabs_stripe_stash_next_action" type="ParadoxLabs\StripeHyvaCheckout\Plugin\StashNextActionPlugin"/>
+    </type>
+
     <type name="Hyva\Checkout\Model\Magewire\Payment\PlaceOrderServiceProvider">
         <arguments>
             <argument name="placeOrderServiceList" xsi:type="array">

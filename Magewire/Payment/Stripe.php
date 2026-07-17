@@ -28,6 +28,7 @@ use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Payment\Model\MethodInterface;
+use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\Data\CartInterface;
 use Magewirephp\Magewire\Component\Form;
 use ParadoxLabs\Stripe\Helper\Data;
@@ -97,6 +98,7 @@ class Stripe extends Form implements EvaluationInterface
         Validator $validator,
         protected CheckoutSession $checkoutSession,
         protected CardRepositoryInterface $cardRepository,
+        protected CartRepositoryInterface $quoteRepository,
         protected Data $helper,
         protected Intents $intents,
         protected PaymentForm $formViewModel,
@@ -210,10 +212,11 @@ class Stripe extends Form implements EvaluationInterface
     /**
      * Check for a pending 3DS next-action after a failed place-order attempt.
      *
-     * On requires_action, Method::confirmFromToken() persists the intent id/client_secret onto the
-     * quote payment before throwing, and the checkout-failure observer saves the quote. Verify the
-     * intent is genuinely awaiting action before handing the client_secret to the browser, so a
-     * stale secret from an earlier attempt can never misfire the challenge UI on a plain decline.
+     * On requires_action, StashNextActionPlugin persists the intent id/client_secret from the
+     * thrown StripeAuthenticationRequiredException onto the quote payment (the order payment that
+     * Method::persistIntent() wrote to is rolled back with the failed submit). Verify the intent
+     * is genuinely awaiting action before handing the client_secret to the browser, then consume
+     * the stash one-shot so the same secret is never served twice.
      *
      * The client_secret is scoped to this customer's own intent and session; it is never logged.
      *
@@ -222,13 +225,20 @@ class Stripe extends Form implements EvaluationInterface
     public function getNextAction(): ?array
     {
         try {
-            $payment      = $this->getQuote()->getPayment();
+            $quote        = $this->getQuote();
+            $payment      = $quote->getPayment();
             $intentId     = (string)$payment->getAdditionalInformation(Intents::INTENT_ID);
             $clientSecret = (string)$payment->getAdditionalInformation(Intents::CLIENT_SECRET);
 
             if ($intentId === '' || $clientSecret === '') {
                 return null;
             }
+
+            // Consume the stash regardless of outcome; StashNextActionPlugin refills it if the
+            // next attempt also comes back requires_action.
+            $payment->setAdditionalInformation(Intents::INTENT_ID, null);
+            $payment->setAdditionalInformation(Intents::CLIENT_SECRET, null);
+            $this->quoteRepository->save($quote);
 
             $intent = $this->intents->getIntent((int)$this->helper->getCurrentStoreId(), $intentId);
 
