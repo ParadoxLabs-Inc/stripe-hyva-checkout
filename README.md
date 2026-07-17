@@ -52,6 +52,22 @@ These commands will download and apply any available updates to the module.
 If you have any integrations or custom functionality based on this extension, we strongly recommend testing to ensure
 they are not affected.
 
+Known Limitations (TODO)
+========================
+
+Pre-release caveats — verify before relying on these in production:
+
+* **TODO: Live install verification.** This module has not yet been exercised against a running Hyva Checkout
+  install. Two assumptions need confirmation there: Magewire `$wire` action return values resolving through the
+  call promise (standard Livewire v2 semantics), and `dispatchBrowserEvent` delivery (the template defensively
+  listens on both `window` and `document`).
+* **TODO: Browser QA of the 3D Secure and wallet matrix** (challenge, challenge-abandoned, decline-after-challenge;
+  Apple Pay / Google Pay / Link).
+* **TODO: Card management on Hyva customer account pages.** The Luma-based TokenBase card-management link is removed
+  from the Hyva account navigation; there is no Hyva-native replacement yet.
+* A $0 quote with `payment_action` not set to `order` will not render the Element (`mode: 'payment'` requires a
+  positive amount). This matches the Luma renderer's behavior.
+
 Changelog
 =========
 
