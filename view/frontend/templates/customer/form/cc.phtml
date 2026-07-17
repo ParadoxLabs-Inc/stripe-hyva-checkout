@@ -488,18 +488,13 @@ endif;
 
                 /**
                  * The mandate is established: write the confirmed SetupIntent id into
-                 * payment[token] and submit to the TokenBase save controller. The Save controller
-                 * reads the card hash from 'id' (Luma parity); the shared scaffold names its
-                 * hidden field card_id, so rename it — empty on add, the card hash on edit.
+                 * payment[token] and submit to the TokenBase save controller. The scaffold's
+                 * hidden 'id' field carries the card hash on edit (empty on add), so the
+                 * controller updates the right card (Luma parity).
                  */
                 completeVaultSave(paymentToken) {
                     const form = this.getForm();
                     form.querySelector('[name="payment[token]"]').value = paymentToken;
-
-                    const cardId = form.querySelector('input[name="card_id"]');
-                    if (cardId) {
-                        cardId.name = 'id';
-                    }
 
                     form.submit();
                 },
