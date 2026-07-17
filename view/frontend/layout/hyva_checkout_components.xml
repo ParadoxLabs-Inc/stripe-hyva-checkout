@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <referenceBlock name="checkout.payment.methods">
+            <block class="ParadoxLabs\StripeHyvaCheckout\Block\CheckoutTemplate" name="checkout.payment.method.paradoxlabs_stripe" as="paradoxlabs_stripe" template="ParadoxLabs_StripeHyvaCheckout::checkout/form.phtml" ifconfig="payment/paradoxlabs_stripe/active">
+                <arguments>
+                    <argument name="magewire" xsi:type="object">\ParadoxLabs\StripeHyvaCheckout\Magewire\Payment\Stripe</argument>
+                    <argument name="method_code" xsi:type="string">paradoxlabs_stripe</argument>
+                    <argument name="metadata" xsi:type="array">
+                        <item name="icon" xsi:type="array">
+                            <item name="svg" xsi:type="string">payment-icons/light/creditcard</item>
+                            <item name="attributes" xsi:type="array">
+                                <item name="fill" xsi:type="string">none</item>
+                            </item>
+                            <item name="subtitle" xsi:type="string" translate="true">Visa, Mastercard &amp; More</item>
+                        </item>
+                    </argument>
+                </arguments>
+            </block>
+        </referenceBlock>
+        <referenceContainer name="magewire.plugin.scripts">
+            <block class="ParadoxLabs\StripeHyvaCheckout\Block\CheckoutTemplate" name="script-paradoxlabs_stripe" template="ParadoxLabs_StripeHyvaCheckout::checkout/scripts.phtml" ifconfig="payment/paradoxlabs_stripe/active">
+                <arguments>
+                    <argument name="method_code" xsi:type="string">paradoxlabs_stripe</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+    </body>
+</page>
