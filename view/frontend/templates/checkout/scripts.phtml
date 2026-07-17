@@ -1,0 +1,360 @@
+<?php declare(strict_types=1);
+/**
+ * Copyright © 2023-present ParadoxLabs, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Need help? Try our knowledgebase and support system:
+ *
+ * @link https://support.paradoxlabs.com
+ */
+
+use Magento\Framework\Escaper;
+use ParadoxLabs\StripeHyvaCheckout\Block\CheckoutTemplate;
+
+/** @var CheckoutTemplate $block */
+/** @var Escaper $escaper */
+/** @var Hyva\Theme\ViewModel\HyvaCsp $hyvaCsp */
+
+$code = $escaper->escapeJs($block->getMethodCode());
+
+$inlineScript = <<<JS
+    'use strict';
+
+    window.addEventListener('checkout:init:validation', event => {
+        hyvaCheckout.evaluation.registerValidator(
+            'validate{$code}',
+            async (element, component) => {
+                return new Promise((resolve, reject) => {
+                    window.dispatchEvent(
+                        new CustomEvent('checkout:validate:{$code}', {detail: {resolve, reject}})
+                    );
+                });
+            }
+        );
+    });
+
+    function {$code}PaymentForm() {
+        return {
+            storedCards: this.\$wire.entangle('storedCards'),
+            selectedCard: '',
+            componentInitialized: false,
+            showForm: true,
+            stripe: null,
+            elements: null,
+            paymentElement: null,
+            tokenizing: false,
+            handlingNextAction: false,
+            token: '',
+            config: {},
+            billingDetails: {},
+            payment: {
+                method: '{$code}',
+                card_id: '',
+                save: true
+            },
+            error: {
+                general: ''
+            },
+            promise: {
+                resolve: null,
+                reject: null
+            },
+            initForm: function() {
+                if (this.componentInitialized) {
+                    return;
+                }
+
+                this.config = JSON.parse(this.\$el.dataset.config);
+                this.selectedCard = this.config.selectedCard || '';
+                this.payment.card_id = this.selectedCard;
+                this.payment.save = this.config.forceSaveCard
+                                    || (this.config.canSaveCard && this.config.defaultSaveCard);
+
+                window.addEventListener(
+                    'checkout:validate:{$code}',
+                    this.validateAndTokenize.bind(this)
+                );
+
+                // Dispatched by the Hyva place-order service processor on any placement failure;
+                // a 3DS challenge arrives as a failure, so check for a pending next-action.
+                window.addEventListener(
+                    'order:place:{$code}:error',
+                    this.handleOrderError.bind(this)
+                );
+
+                // Quote data pushed by the Magewire component when the billing address changes.
+                this._boundQuoteUpdated = this.handleQuoteUpdated.bind(this);
+                document.addEventListener('{$code}QuoteUpdated', this._boundQuoteUpdated);
+                window.addEventListener('{$code}QuoteUpdated', this._boundQuoteUpdated);
+
+                this.loadStripeJs();
+
+                this.\$watch('selectedCard', this.changeSelectedCard.bind(this));
+                this.changeSelectedCard();
+
+                this.componentInitialized = true;
+            },
+            loadStripeJs: function() {
+                if (typeof window.Stripe === 'function') {
+                    this.initStripe();
+                    return;
+                }
+
+                const script = document.createElement('script');
+                script.src = 'https://js.stripe.com/v3/';
+                script.type = 'text/javascript';
+                script.addEventListener('load', this.initStripe.bind(this));
+                document.head.append(script);
+            },
+            initStripe: function() {
+                this.stripe = Stripe(this.config.publicKey);
+
+                // Deferred Element (no intent/clientSecret up front): the intent is created and
+                // confirmed server-side at place-order from the ConfirmationToken; 3DS is handled
+                // on the failed response. cf. https://docs.stripe.com/payments/finalize-payments-on-the-server
+                const options = {
+                    mode: this.config.mode || 'payment',
+                    currency: this.config.currency,
+                    paymentMethodCreation: 'manual',
+                    appearance: {
+                        theme: this.config.elementsTheme || 'stripe',
+                        variables: (!!this.config.fieldStyle && this.config.fieldStyle.constructor === Object)
+                                   ? this.config.fieldStyle
+                                   : {}
+                    }
+                };
+
+                if (options.mode !== 'setup') {
+                    options.amount = this.config.grandTotal;
+                    options.setupFutureUsage = 'off_session';
+                    options.captureMethod = 'manual';
+                }
+
+                this.elements = this.stripe.elements(options);
+
+                this.initPaymentElement();
+            },
+            initPaymentElement: function() {
+                this.paymentElement = this.elements.create(
+                    'payment',
+                    {
+                        layout: {
+                            type: 'accordion',
+                            defaultCollapsed: false,
+                            radios: 'if_multiple',
+                            spacedAccordionItems: false
+                        },
+                        wallets: {
+                            applePay: 'auto',
+                            googlePay: 'auto',
+                            link: 'auto'
+                        },
+                        fields: {
+                            billingDetails: {
+                                name: 'never',
+                                phone: 'never',
+                                address: {
+                                    line1: 'never',
+                                    line2: 'never',
+                                    city: 'never',
+                                    state: 'never',
+                                    country: 'never',
+                                    postalCode: 'never'
+                                }
+                            }
+                        }
+                    }
+                );
+
+                this.paymentElement.mount('#{$code}-cc');
+                this.paymentElement.on('change', this.handleStripeChange.bind(this));
+
+                // Billing details are attached at tokenization from server-side quote data.
+                this.\$wire.getQuoteData().then(this.applyQuoteData.bind(this));
+            },
+            handleStripeChange: function(event) {
+                this.error.general = event.error ? event.error.message : '';
+            },
+            handleQuoteUpdated: function(event) {
+                this.applyQuoteData(event.detail || {});
+            },
+            applyQuoteData: function(data, force) {
+                if (!data || typeof data !== 'object') {
+                    return;
+                }
+
+                if (data.billingDetails) {
+                    this.billingDetails = data.billingDetails;
+                }
+
+                // Client-only wallet-sheet/validation sync; the charge amount is always
+                // re-derived server-side at confirm. Never disturb the Element mid-tokenization
+                // (elements.submit()/createConfirmationToken in flight), except for the refresh
+                // that immediately precedes it.
+                if (this.elements
+                    && this.config.mode !== 'setup'
+                    && (this.tokenizing === false || force === true)
+                    && data.amount
+                    && data.amount > 0) {
+                    this.elements.update({ amount: data.amount });
+                }
+            },
+            validateAndTokenize: function(event) {
+                this.promise.resolve = event.detail.resolve;
+                this.promise.reject  = event.detail.reject;
+
+                // A stored card, or an already-tokenized payment (pi_/seti_ from a 3DS resubmit),
+                // goes straight to the server.
+                if (this.payment.card_id || this.token) {
+                    this.submitPayload();
+                    return;
+                }
+
+                if (!this.stripe || !this.elements) {
+                    this.failValidation('{$escaper->escapeJs(__('The payment form failed to load. Please reload and try again.'))}');
+                    return;
+                }
+
+                this.tokenizing = true;
+
+                // Refresh quote data (amount + billing details) so the ConfirmationToken is minted
+                // against current values, then validate the Element and tokenize. Wallet payments
+                // (Apple/Google Pay, Link) collected by the Payment Element flow through here too.
+                this.\$wire.getQuoteData()
+                    .then(data => {
+                        this.applyQuoteData(data, true);
+
+                        return this.elements.submit();
+                    })
+                    .then(submitResult => {
+                        if (submitResult && submitResult.error) {
+                            throw submitResult.error;
+                        }
+
+                        return this.stripe.createConfirmationToken({
+                            elements: this.elements,
+                            params: {
+                                payment_method_data: {
+                                    billing_details: this.billingDetails
+                                }
+                            }
+                        });
+                    })
+                    .then(result => {
+                        if (result.error || !result.confirmationToken) {
+                            throw result.error || {};
+                        }
+
+                        this.tokenizing = false;
+                        this.token = result.confirmationToken.id;
+                        this.submitPayload();
+                    })
+                    .catch(error => {
+                        console.error(error);
+                        this.failValidation(
+                            error && error.message
+                                ? error.message
+                                : '{$escaper->escapeJs(__('Unable to process payment details. Please check the payment form.'))}'
+                        );
+                    });
+            },
+            submitPayload: function() {
+                let payload = {
+                    method: this.payment.method,
+                    save: this.payment.save ? 1 : 0
+                };
+
+                if (this.payment.card_id) {
+                    payload.card_id = this.payment.card_id;
+                } else {
+                    payload.token = this.token;
+                }
+
+                hyvaCheckout.storage.setValue('payment', payload);
+
+                this.promise.resolve(true);
+            },
+            failValidation: function(message) {
+                this.tokenizing = false;
+                this.token = '';
+                this.error.general = message;
+
+                if (this.promise.reject) {
+                    this.promise.reject(message);
+                }
+            },
+            handleOrderError: function(event) {
+                if (this.handlingNextAction) {
+                    return;
+                }
+
+                // A spent ConfirmationToken is single-use; never resubmit it.
+                this.token = '';
+
+                // A 3DS challenge arrives as a placement failure. Ask the server whether the
+                // failed attempt left an intent awaiting action (verified against Stripe, so a
+                // plain decline can never misfire the challenge UI).
+                this.handlingNextAction = true;
+
+                this.\$wire.getNextAction()
+                    .then(this.runNextAction.bind(this))
+                    .catch(() => {
+                        this.handlingNextAction = false;
+                    });
+            },
+            runNextAction: function(nextAction) {
+                if (!nextAction || !nextAction.client_secret || !this.stripe) {
+                    this.handlingNextAction = false;
+                    return;
+                }
+
+                this.stripe.handleNextAction({
+                    clientSecret: nextAction.client_secret
+                }).then(result => {
+                    this.handlingNextAction = false;
+
+                    const intent = result.paymentIntent ?? result.setupIntent;
+
+                    if (result.error || !intent) {
+                        this.error.general = result.error && result.error.message
+                            ? result.error.message
+                            : '{$escaper->escapeJs(__('Card verification failed. Please try again.'))}';
+                        return;
+                    }
+
+                    // pi_.../seti_...; the server retrieves this confirmed intent on resubmit.
+                    this.token = intent.id;
+                    hyvaCheckout.order.place();
+                });
+            },
+            changeSelectedCard: function() {
+                this.showForm = !this.selectedCard;
+                this.payment.card_id = this.selectedCard;
+                this.token = '';
+            },
+            getErrorMessage() {return this.error.general},
+            getSave() {return this.payment.save},
+            isStoredCardSelected() {return this.storedCard.hash === this.selectedCard},
+            setSave() {return this.payment.save = this.\$el.checked ? 1 : 0},
+            setSelectedCard() {return this.selectedCard = this.\$el.value},
+            showSaveOption() {return this.showForm && this.config.canSaveCard},
+            showStoredCards() {return Object.keys(this.storedCards).length > 0}
+        }
+    }
+
+    window.addEventListener('alpine:init', () => Alpine.data('{$code}PaymentForm', {$code}PaymentForm), {once: true});
+JS;
+?>
+<script><?= /* @noEscape */ $inlineScript ?></script>
+<?php $hyvaCsp->registerInlineScript() ?>

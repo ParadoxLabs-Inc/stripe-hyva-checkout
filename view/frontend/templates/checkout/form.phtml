@@ -1,0 +1,117 @@
+<?php declare(strict_types=1);
+
+/**
+ * Copyright © 2023-present ParadoxLabs, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Need help? Try our knowledgebase and support system:
+ *
+ * @link https://support.paradoxlabs.com
+ */
+
+use Hyva\Theme\Model\ViewModelRegistry;
+use Magento\Framework\Escaper;
+use ParadoxLabs\StripeHyvaCheckout\Block\CheckoutTemplate;
+use ParadoxLabs\StripeHyvaCheckout\Magewire\Payment\Stripe;
+use ParadoxLabs\StripeHyvaCheckout\ViewModel\PaymentForm;
+
+/** @var CheckoutTemplate $block */
+/** @var Stripe $magewire */
+/** @var Escaper $escaper */
+/** @var ViewModelRegistry $viewModels */
+/** @var PaymentForm $formViewModel */
+
+$code = $escaper->escapeHtmlAttr($block->getMethodCode());
+$formViewModel = $viewModels->require(PaymentForm::class);
+$formBlock = $formViewModel->getFormBlock($code);
+$method = $formBlock->getMethod();
+$config = $block->getConfig();
+$image = $config['logoImage'] ?? false;
+?>
+<div class="<?= /* @noEscape */ $code ?>"
+     x-data="<?= /* @noEscape */ $code ?>PaymentForm"
+     x-init="initForm"
+     data-config='<?= $escaper->escapeJsQuote(json_encode($config)) ?>'
+>
+    <?php if ($image): ?>
+        <div class="flex justify-end mb-2">
+            <img src="<?= $escaper->escapeHtmlAttr($image); ?>" alt="<?= $escaper->escapeHtmlAttr($method->getTitle()) ?>" />
+        </div>
+    <?php endif; ?>
+
+    <div class="field required mb-2" x-show="showStoredCards" x-cloak>
+        <label for="<?= /* @noEscape */ $code ?>-card-id" class="label text-gray-700 text-sm">
+            <?= $escaper->escapeHtml(__('Payment Information')) ?>
+        </label>
+        <select id="<?= /* @noEscape */ $code ?>-card-id"
+                class="block w-full shadow-sm border-gray-300 rounded-md"
+                :value="selectedCard"
+                @change="setSelectedCard"
+        >
+            <template x-for="storedCard in storedCards" :key="storedCard.hash">
+                <option :value="storedCard.hash"
+                        :data-type="storedCard.type"
+                        :selected="isStoredCardSelected"
+                        x-text="storedCard.label">
+                </option>
+            </template>
+            <option value=''><?= $escaper->escapeHtml(__('Add new card')) ?></option>
+        </select>
+
+        <?php if ($magewire->hasError('selectedCard')): ?>
+            <span class="text-red-800" id="selected-card-error">
+                <?= $escaper->escapeHtml($magewire->getError('selectedCard')) ?>
+            </span>
+        <?php endif ?>
+    </div>
+
+    <div class="card prose -m-4 mt-0 sm:m-0 grid gap-4"
+         x-show="showForm"
+         wire:ignore
+    >
+        <div id="<?= /* @noEscape */ $code ?>-cc"></div>
+    </div>
+
+    <span class="text-red-600"
+          id="payment-error-general"
+          x-show="getErrorMessage"
+          x-text="getErrorMessage"
+    ></span>
+
+    <?php if (!$formBlock->isGuestCheckout()): ?>
+        <div x-show="showSaveOption"
+             x-cloak
+             class="flex items-center gap-2 mt-2"
+        >
+            <?php if ((bool)$method->getConfigData('allow_unsaved')): ?>
+                <input type="checkbox"
+                       title="<?= $escaper->escapeHtmlAttr(__('Save for next time')) ?>"
+                       class="cursor-pointer"
+                       id="<?= /* @noEscape */ $code ?>-save"
+                       name="payment[save]"
+                       :checked="getSave"
+                       @change="setSave"
+                />
+                <label for="<?= /* @noEscape */ $code ?>-save"
+                       class="label text-gray-700 text-sm cursor-pointer">
+                    <?= $escaper->escapeHtml(__('Save for next time')) ?>
+                </label>
+            <?php else: ?>
+                <p class="text-secondary mt-4 text-sm"><?= $escaper->escapeHtml(__('For your convenience, this data will be stored securely by our payment processor.')) ?></p>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+
+    <?= /* @noEscape */ $block->getChildHtml(); ?>
+</div>
