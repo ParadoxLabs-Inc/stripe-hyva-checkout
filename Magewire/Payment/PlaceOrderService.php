@@ -54,6 +54,14 @@ class PlaceOrderService extends AbstractPlaceOrderService
      * quote payment, and the client recovers it via the payment component's getNextAction()
      * on the order:place error event.
      *
+     * The addData() that follows importData() is load-bearing, not redundant: Hyva's
+     * AbstractPlaceOrderService passes the quote payment into CartManagement::placeOrder(),
+     * and QuoteManagement::placeOrderRun re-runs importData($payment->getData()). The Stripe
+     * assign observer unconditionally writes additional_information.token from the incoming
+     * data — which carries no top-level token after the first assign — so without the
+     * re-staged keys that second import would overwrite the just-stored ConfirmationToken
+     * with '' and every new-card order would fail at confirm.
+     *
      * @throws CouldNotSaveException
      * @throws \Magento\Framework\Exception\LocalizedException
      */
@@ -67,10 +75,15 @@ class PlaceOrderService extends AbstractPlaceOrderService
             self::ALLOWED_KEYS,
         );
 
-        $quote->getPayment()->importData([
+        $payment = $quote->getPayment();
+        $payment->importData([
             PaymentInterface::KEY_METHOD => ConfigProvider::CODE,
             PaymentInterface::KEY_ADDITIONAL_DATA => $knownPaymentData,
         ]);
+
+        // Re-stage the allowed keys as raw payment data so the re-import re-asserts them
+        // through the observer chain instead of clearing them (see docblock).
+        $payment->addData($knownPaymentData);
 
         return parent::placeOrder($quote);
     }
