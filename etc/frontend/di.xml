@@ -6,6 +6,14 @@
         </arguments>
     </type>
 
+    <type name="ParadoxLabs\TokenBaseHyvaCheckout\ViewModel\SupportedMethods">
+        <arguments>
+            <argument name="methods" xsi:type="array">
+                <item name="paradoxlabs_stripe" xsi:type="string">paradoxlabs_stripe</item>
+            </argument>
+        </arguments>
+    </type>
+
     <type name="ParadoxLabs\StripeHyvaCheckout\Magewire\Payment\PlaceOrderService">
         <plugin name="paradoxlabs_stripe_stash_next_action" type="ParadoxLabs\StripeHyvaCheckout\Plugin\StashNextActionPlugin"/>
     </type>

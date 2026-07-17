@@ -3,6 +3,7 @@
     <module name="ParadoxLabs_StripeHyvaCheckout">
         <sequence>
             <module name="ParadoxLabs_Stripe"/>
+            <module name="ParadoxLabs_TokenBaseHyvaCheckout"/>
             <module name="Hyva_Checkout"/>
             <module name="Hyva_Theme"/>
         </sequence>
