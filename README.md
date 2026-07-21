@@ -52,6 +52,39 @@ These commands will download and apply any available updates to the module.
 If you have any integrations or custom functionality based on this extension, we strongly recommend testing to ensure
 they are not affected.
 
+Error Handling and 3-D Secure Recovery
+======================================
+
+Place-order failures are handled inside `Magewire\Payment\PlaceOrderService` rather than being
+rethrown. Hyva's default `AbstractPlaceOrderService::handleException()` rethrows the exception, which
+aborts the Magewire request before the `order:place:paradoxlabs_stripe:error` browser event the
+processor queued can reach the response. That event is what drives this module's inline 3-D Secure
+recovery (`scripts.phtml`: `getNextAction()` → `stripe.handleNextAction()` → re-place) and the
+single-use ConfirmationToken scrub — so with the default rethrow, neither ever runs, and in
+production the customer only sees a generic "page refresh" dialog.
+
+This service therefore overrides three methods:
+
+* `handleException()` buffers the exception instead of rethrowing, letting the request complete and
+  deliver the queued event.
+* `evaluateCompletion()` reports the failure through the standard messenger. A `LocalizedException`
+  message (the decline reason) is shown verbatim; anything else is masked to a generic message so
+  raw internals never leak.
+* `canRedirect()` returns `false` while a failure is buffered, suppressing the success-page redirect
+  the processor would otherwise push once the exception stops propagating.
+
+**3-D Secure message decision:** a `requires_action` result surfaces here as a
+`StripeAuthenticationRequiredException`, but it is not a decline — the client immediately runs the
+challenge and re-places the order. Showing the raw exception (or a red decline) would be misleading
+and could leak the intent id / client_secret, so for this exception class the message is *softened*:
+a neutral, warning-styled "Confirming your payment…" note with no sensitive detail. It remains a
+failure result (no success, no redirect) so the event-driven recovery still runs; a genuine failure
+*after* the challenge is reported inline by `runNextAction()`. All other exceptions use the
+verbatim/masked policy above.
+
+The `order:place:paradoxlabs_stripe:error` listener also fires for ordinary declines (no
+next-action): `getNextAction()` returns null and the listener resets without a second message.
+
 Known Limitations (TODO)
 ========================
 

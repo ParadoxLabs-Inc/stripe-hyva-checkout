@@ -8,6 +8,7 @@ use Hyva\Checkout\Model\Magewire\Component\Evaluation\ErrorMessage;
 use Hyva\Checkout\Model\Magewire\Component\Evaluation\Validation;
 use Hyva\Checkout\Model\Magewire\Component\EvaluationResultFactory;
 use Magento\Checkout\Model\Session as CheckoutSession;
+use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\Quote\Address;
@@ -16,7 +17,7 @@ use ParadoxLabs\Stripe\Helper\Data;
 use ParadoxLabs\Stripe\Model\Service\Intents;
 use ParadoxLabs\StripeHyvaCheckout\Magewire\Payment\Stripe;
 use ParadoxLabs\StripeHyvaCheckout\ViewModel\PaymentForm;
-use ParadoxLabs\TokenBase\Api\CardRepositoryInterface;
+use ParadoxLabs\TokenBase\Api\CardRepositoryInterface as TokenBaseCardRepositoryInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Rakit\Validation\Validator;
@@ -30,6 +31,7 @@ class StripeTest extends TestCase
     private Stripe $component;
     private CheckoutSession|MockObject $checkoutSession;
     private CartRepositoryInterface|MockObject $quoteRepository;
+    private TokenBaseCardRepositoryInterface|MockObject $cardRepository;
     private Data|MockObject $helper;
     private Intents|MockObject $intents;
     private Quote|MockObject $quote;
@@ -39,6 +41,7 @@ class StripeTest extends TestCase
     {
         $this->checkoutSession = $this->createMock(CheckoutSession::class);
         $this->quoteRepository = $this->createMock(CartRepositoryInterface::class);
+        $this->cardRepository = $this->createMock(TokenBaseCardRepositoryInterface::class);
         $this->helper = $this->createMock(Data::class);
         $this->intents = $this->createMock(Intents::class);
 
@@ -56,12 +59,33 @@ class StripeTest extends TestCase
         $this->component = new Stripe(
             new Validator(),
             $this->checkoutSession,
-            $this->createMock(CardRepositoryInterface::class),
+            $this->cardRepository,
             $this->quoteRepository,
             $this->helper,
             $this->intents,
             $this->createMock(PaymentForm::class),
         );
+    }
+
+    /**
+     * boot tests
+     */
+
+    /**
+     * A tokenbase_id pointing at a card the customer has since deleted must not brick the
+     * component: getById throwing has to fall back to new-card entry, never 500 the request.
+     */
+    public function testBootSwallowsRepositoryErrorForDeletedCard(): void
+    {
+        $this->payment->method('getData')->with('tokenbase_id')->willReturn('999');
+
+        $this->cardRepository->method('getById')
+            ->with('999')
+            ->willThrowException(new NoSuchEntityException(__('No such entity.')));
+
+        $this->component->boot();
+
+        $this->assertSame([], $this->component->storedCards);
     }
 
     /**

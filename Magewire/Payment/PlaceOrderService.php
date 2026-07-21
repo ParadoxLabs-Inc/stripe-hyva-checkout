@@ -21,14 +21,29 @@
 
 namespace ParadoxLabs\StripeHyvaCheckout\Magewire\Payment;
 
+use Exception;
+use Hyva\Checkout\Model\Magewire\Component\EvaluationResultFactory;
+use Hyva\Checkout\Model\Magewire\Component\EvaluationResultInterface;
 use Hyva\Checkout\Model\Magewire\Payment\AbstractPlaceOrderService;
 use Magento\Framework\Exception\CouldNotSaveException;
+use Magento\Framework\Exception\LocalizedException;
 use Magento\Quote\Api\Data\PaymentInterface;
 use Magento\Quote\Model\Quote;
+use Magewirephp\Magewire\Component;
+use ParadoxLabs\Stripe\Exception\StripeAuthenticationRequiredException;
 use ParadoxLabs\Stripe\Model\ConfigProvider;
+use Throwable;
 
 class PlaceOrderService extends AbstractPlaceOrderService
 {
+    /**
+     * Place-order failure buffered by handleException() for evaluateCompletion()/canRedirect().
+     *
+     * @var Exception|null
+     */
+    protected ?Exception $placeOrderException = null;
+
+
     /**
      * ConfirmationToken flow additional_data contract: exactly one of {token, card_id} populated
      * per submit, plus the save-card flag. token carries a ctoken_ (fresh tokenization) or a
@@ -49,10 +64,11 @@ class PlaceOrderService extends AbstractPlaceOrderService
      * resolves card_id into tokenbase_id.
      *
      * On a Stripe requires_action (3DS) result, Method::confirmFromToken() throws
-     * StripeAuthenticationRequiredException; its generic message surfaces through the default
-     * handleException() rethrow, StashNextActionPlugin persists the challenge data onto the
-     * quote payment, and the client recovers it via the payment component's getNextAction()
-     * on the order:place error event.
+     * StripeAuthenticationRequiredException from inside parent::placeOrder(). StashNextActionPlugin
+     * (which wraps this method, so it observes the throw before the processor does) persists the
+     * challenge data onto the quote payment; the processor then queues the order:place error event
+     * and hands the exception to handleException() below. The client recovers the challenge via the
+     * payment component's getNextAction() on that event.
      *
      * The addData() that follows importData() is load-bearing, not redundant: Hyva's
      * AbstractPlaceOrderService passes the quote payment into CartManagement::placeOrder(),
@@ -86,5 +102,99 @@ class PlaceOrderService extends AbstractPlaceOrderService
         $payment->addData($knownPaymentData);
 
         return parent::placeOrder($quote);
+    }
+
+    /**
+     * Accept a place-order failure instead of rethrowing.
+     *
+     * The default AbstractPlaceOrderService::handleException() rethrows. That rethrow aborts the
+     * Magewire request before the queued order:place:{method}:error browser events reach the
+     * response effects, so the client-side 3DS recovery (getNextAction -> handleNextAction ->
+     * re-place) and the spent-token scrub in scripts.phtml never run, and in production the
+     * customer only sees a generic "page refresh" dialog.
+     *
+     * Buffering the exception lets the request complete normally, which delivers those events;
+     * evaluateCompletion() then surfaces the (sanitized) outcome and canRedirect() suppresses the
+     * unconditional success-page redirect the processor would otherwise push for the failed
+     * attempt.
+     *
+     * StashNextActionPlugin has already persisted any 3DS challenge data by this point: it wraps
+     * placeOrder() and runs to completion (stash saved, then rethrow) before the processor calls
+     * this method, so the non-rethrow behavior here does not affect the stash.
+     */
+    public function handleException(Exception $exception, Component $component, Quote $quote): void
+    {
+        $this->placeOrderException = $exception;
+    }
+
+    /**
+     * Report the place-order outcome: default success behavior when an order was placed, otherwise
+     * a failure message.
+     *
+     * A requires_action (3DS) failure is not a decline the customer should be alarmed by — the
+     * scripts.phtml order:place:{method}:error listener immediately runs the challenge and
+     * re-places the order — so it is softened to a neutral, non-leaking note (never the raw
+     * challenge exception) while still returning a failure result so no success/redirect fires and
+     * the event-driven recovery can proceed. A genuine failure after the challenge is reported
+     * inline by runNextAction().
+     *
+     * For every other failure, a LocalizedException message is safe to show verbatim (the decline
+     * reason); anything else is masked, mirroring the processor's own event-detail policy. Never
+     * returns the parent's unconditional success for a failed attempt.
+     */
+    public function evaluateCompletion(
+        EvaluationResultFactory $resultFactory,
+        int|null $orderId = null,
+    ): EvaluationResultInterface {
+        if ($this->placeOrderException === null) {
+            return parent::evaluateCompletion($resultFactory, $orderId);
+        }
+
+        $errorMessage = $resultFactory->createErrorMessage();
+
+        if ($this->findAuthException($this->placeOrderException) !== null) {
+            $errorMessage->asWarning();
+            $errorMessage->withMessage(
+                (string)__('Confirming your payment. Please complete any additional verification prompts.')
+            );
+            $errorMessage->withVisibilityDuration(7500);
+
+            return $errorMessage;
+        }
+
+        $message = $this->placeOrderException instanceof LocalizedException
+            ? $this->placeOrderException->getMessage()
+            : (string)__('Something went wrong while processing your order. Please try again.');
+
+        $errorMessage->withMessage($message);
+        $errorMessage->withVisibilityDuration(7500);
+
+        return $errorMessage;
+    }
+
+    /**
+     * Block the processor's success-page redirect after a failed attempt, keeping the customer on
+     * checkout in a retryable state (and, for 3DS, able to run the challenge in place).
+     */
+    public function canRedirect(): bool
+    {
+        return $this->placeOrderException === null;
+    }
+
+    /**
+     * Find a StripeAuthenticationRequiredException in the exception chain, if any.
+     *
+     * Mirrors StashNextActionPlugin: the challenge exception may be wrapped by the time it reaches
+     * the processor, so walk the previous-exception chain rather than checking the top level only.
+     */
+    protected function findAuthException(Throwable $exception): ?StripeAuthenticationRequiredException
+    {
+        for (; $exception !== null; $exception = $exception->getPrevious()) {
+            if ($exception instanceof StripeAuthenticationRequiredException) {
+                return $exception;
+            }
+        }
+
+        return null;
     }
 }

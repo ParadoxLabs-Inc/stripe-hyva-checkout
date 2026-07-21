@@ -131,13 +131,21 @@ class Stripe extends Form implements EvaluationInterface
     {
         $payment = $this->getQuote()->getPayment();
 
-        if ($payment->getData('tokenbase_id') !== null) {
-            $card = $this->cardRepository->getById($payment->getData('tokenbase_id'));
+        if ($payment->getData('tokenbase_id') === null) {
+            return;
+        }
 
-            if ($card->getMethod() === static::METHOD_CODE
-                && (int)$card->getCustomerId() === (int)$this->getQuote()->getCustomerId()) {
-                $this->addStoredCardToList($card);
-            }
+        try {
+            $card = $this->cardRepository->getById($payment->getData('tokenbase_id'));
+        } catch (Throwable) {
+            // The assigned card no longer exists (deleted since assignment); fall back to
+            // new-card entry rather than 500-ing every Magewire request for the component.
+            return;
+        }
+
+        if ($card->getMethod() === static::METHOD_CODE
+            && (int)$card->getCustomerId() === (int)$this->getQuote()->getCustomerId()) {
+            $this->addStoredCardToList($card);
         }
     }
 
