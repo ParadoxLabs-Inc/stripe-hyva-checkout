@@ -22,7 +22,7 @@ class RegisterHyvaCompatibilityObserver implements ObserverInterface
     ) {
     }
 
-    public function execute(Observer $event)
+    public function execute(Observer $event): void
     {
         $config     = $event->getData('config');
         $extensions = $config->hasData('extensions') ? $config->getData('extensions') : [];
@@ -31,12 +31,28 @@ class RegisterHyvaCompatibilityObserver implements ObserverInterface
             $extensions = [];
         }
 
-        $moduleName = implode('_', array_slice(explode('\\', self::class), 0, 2));
+        $moduleName = implode('_', array_slice(explode('\\', __CLASS__), 0, 2));
 
-        $path = $this->componentRegistrar->getPath(ComponentRegistrar::MODULE, $moduleName);
+        $path = (string) $this->componentRegistrar->getPath(ComponentRegistrar::MODULE, $moduleName);
 
-        // Only use the path relative to the Magento base dir
-        $extensions[] = ['src' => substr((string) $path, strlen(BP) + 1)];
+        // ComponentRegistrar resolves registration.php's __DIR__ to a real path. Handle symlinks in case.
+        if (str_starts_with($path, BP . DIRECTORY_SEPARATOR)) {
+            $src = substr($path, strlen(BP) + 1);
+        } else {
+            $appCodePath = 'app' . DIRECTORY_SEPARATOR . 'code' . DIRECTORY_SEPARATOR
+                . str_replace('_', DIRECTORY_SEPARATOR, $moduleName);
+            $symlink     = BP . DIRECTORY_SEPARATOR . $appCodePath;
+
+            // phpcs:ignore Magento2.Functions.DiscouragedFunction
+            if (is_link($symlink) && realpath($symlink) === realpath($path)) {
+                $src = $appCodePath;
+            } else {
+                // Last resort: keep the historical behavior.
+                $src = substr($path, strlen(BP) + 1);
+            }
+        }
+
+        $extensions[] = ['src' => $src];
 
         $config->setData('extensions', $extensions);
     }
