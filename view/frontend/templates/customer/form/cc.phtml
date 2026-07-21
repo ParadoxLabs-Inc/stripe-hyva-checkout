@@ -1,0 +1,531 @@
+<?php declare(strict_types=1);
+
+/**
+ * Copyright © 2023-present ParadoxLabs, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Need help? Try our knowledgebase and support system:
+ *
+ * @link https://support.paradoxlabs.com
+ */
+
+use Magento\Framework\Escaper;
+use Magento\Framework\View\Element\Template;
+use ParadoxLabs\Stripe\Block\Customer\Form;
+use ParadoxLabs\Stripe\Model\ConfigProvider;
+
+/**
+ * Stripe Payment Element pane for the Hyva customer payment-options add/edit form.
+ *
+ * Rendered as the 'payment_pane' child of the shared TokenBaseHyvaCheckout form scaffold; mounts a
+ * setup-scope Payment Element when the scaffold announces the address step is confirmed, and on
+ * Save mints a ConfirmationToken, confirms the SetupIntent through the dedicated vault confirm
+ * endpoint (with 3DS handled inline), then submits the form with the confirmed intent id in
+ * payment[token] — the same contract as the Luma paradoxlabsStripeForm vault flow.
+ *
+ * @var Template $block
+ * @var Escaper $escaper
+ * @var Hyva\Theme\ViewModel\HyvaCsp $hyvaCsp
+ */
+
+/** @var Form $form The gateway form block; this pane is declared as its child in layout. */
+$form = $block->getParentBlock();
+$method = $form->getMethod();
+
+$code = $escaper->escapeHtmlAttr(ConfigProvider::CODE);
+$publicKey = (string)$method->getConfigData('public_key');
+$paneConfig = [
+    'code' => ConfigProvider::CODE,
+    'publicKey' => $publicKey,
+    'currency' => $form->getCurrency(),
+    'confirmUrl' => $block->getUrl('paradoxlabs_stripe/vault/confirm', ['_secure' => true]),
+    'elementsTheme' => (string)$method->getConfigData('elements_theme'),
+    'fieldStyle' => json_decode((string)$method->getConfigData('elements_variables'), true, 2) ?: [],
+];
+
+$tServerError = $escaper->escapeJs(__('A server error occurred. Please try again.'));
+$tLoadFailed  = $escaper->escapeJs(__('The payment form could not be loaded. Please reload the page and try again.'));
+
+// Method active but unavailable (e.g. currency restriction): config is empty; render a notice.
+if (empty($publicKey)): ?>
+    <div class="message warning">
+        <?= $escaper->escapeHtml(__('This payment method is not currently available. Please try again later.')) ?>
+    </div>
+    <?php return;
+endif;
+?>
+<fieldset class="mb-4"
+          x-data="<?= /* @noEscape */ $code ?>PaymentinfoPane"
+          data-config="<?= $escaper->escapeHtmlAttr(json_encode($paneConfig)) ?>"
+>
+    <legend class="text-lg font-medium mb-2"><?= $escaper->escapeHtml(__('Payment Information')) ?></legend>
+
+    <input type="hidden" name="payment[token]" value=""/>
+
+    <?php if ($form->isEdit()): ?>
+        <p class="text-sm text-gray-700 mb-2">
+            <?= $escaper->escapeHtml(__('Please re-enter your payment info for security.')) ?>
+        </p>
+    <?php endif; ?>
+
+    <div class="relative">
+        <div x-show="loading" x-cloak class="flex justify-center p-4">
+            <svg class="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                 aria-label="<?= $escaper->escapeHtmlAttr(__('Loading payment form')) ?>">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135
+                         5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+        <div id="<?= /* @noEscape */ $code ?>-cc"></div>
+    </div>
+
+    <p class="text-red-600 text-sm mt-2" x-show="errorMessage" x-text="errorMessage" x-cloak></p>
+
+    <div class="mt-4">
+        <button type="button"
+                class="btn btn-primary"
+                :disabled="!ready || saving"
+                @click="save"
+        >
+            <?= $escaper->escapeHtml(__('Save')) ?>
+        </button>
+    </div>
+</fieldset>
+
+<script>
+    'use strict';
+
+    (function () {
+        if (window.<?= /* @noEscape */ $code ?>PaymentinfoPaneRegistered) {
+            return;
+        }
+
+        window.<?= /* @noEscape */ $code ?>PaymentinfoPaneRegistered = true;
+
+        // Consecutive dead-mount cap, so a persistently broken Stripe.js load or Element mount
+        // stops with a clear message rather than looping. Reset on each deliberate
+        // address-confirm re-entry.
+        const MAX_MOUNT_FAILURES = 3;
+
+        window.addEventListener('alpine:init', () => {
+            Alpine.data('<?= /* @noEscape */ $code ?>PaymentinfoPane', () => ({
+                config: {},
+                loading: false,
+                ready: false,
+                saving: false,
+                errorMessage: '',
+                stripe: null,
+                elements: null,
+                paymentElement: null,
+                _generation: 0,
+                _inFlight: false,
+                _mountFailures: 0,
+
+                init() {
+                    this.config = JSON.parse(this.$el.dataset.config);
+
+                    window.addEventListener(
+                        this.config.code + 'PaymentinfoAddressConfirmed',
+                        this.handleAddressConfirmed.bind(this)
+                    );
+                    window.addEventListener(
+                        this.config.code + 'PaymentinfoAddressEdit',
+                        this.handleAddressEdit.bind(this)
+                    );
+                },
+
+                getForm() {
+                    return this.$el.closest('form');
+                },
+
+                handleAddressConfirmed() {
+                    // Deliberate (re-)entry into the payment step; clear the failure budget so a
+                    // past dead mount does not dead-end a customer who is explicitly retrying.
+                    this._mountFailures = 0;
+
+                    this.mountElement();
+                },
+
+                handleAddressEdit() {
+                    // Unlike a capture-context drop-in, the Element does not bake the address in;
+                    // billing details attach at tokenization. Keep it mounted so entered card data
+                    // survives an address edit (parity with the always-visible Luma form).
+                    this.errorMessage = '';
+                },
+
+                mountElement() {
+                    if (this._inFlight || this.paymentElement) {
+                        return;
+                    }
+
+                    this.loading = true;
+                    this._inFlight = true;
+                    this.errorMessage = '';
+
+                    const generation = ++this._generation;
+
+                    this.loadStripeJs()
+                        .then(() => {
+                            if (generation === this._generation) {
+                                this.initPaymentElement(generation);
+                            }
+                        })
+                        .catch(error => {
+                            if (generation === this._generation) {
+                                this.handleMountError(error && error.message ? error.message : null);
+                            }
+                        });
+                },
+
+                /**
+                 * Load Stripe.js with a window guard, the same way the checkout component does;
+                 * promise-wrapped so a failed load surfaces instead of stalling silently.
+                 */
+                loadStripeJs() {
+                    return new Promise((resolve, reject) => {
+                        if (typeof window.Stripe === 'function') {
+                            resolve();
+
+                            return;
+                        }
+
+                        const existing = document.querySelector('script[data-stripe-js]');
+
+                        if (existing) {
+                            existing.addEventListener('load', () => resolve());
+                            existing.addEventListener('error', () => reject(
+                                new Error('<?= /* @noEscape */ $tLoadFailed ?>')
+                            ));
+
+                            return;
+                        }
+
+                        const script = document.createElement('script');
+                        script.src = 'https://js.stripe.com/v3/';
+                        script.type = 'text/javascript';
+                        script.setAttribute('data-stripe-js', '1');
+                        script.addEventListener('load', () => {
+                            if (typeof window.Stripe === 'function') {
+                                resolve();
+                            } else {
+                                reject(new Error('<?= /* @noEscape */ $tLoadFailed ?>'));
+                            }
+                        });
+                        script.addEventListener('error', () => {
+                            // Remove the dead tag so a retry re-fetches instead of reusing it.
+                            script.remove();
+                            reject(new Error('<?= /* @noEscape */ $tLoadFailed ?>'));
+                        });
+                        document.head.append(script);
+                    });
+                },
+
+                /**
+                 * Build and mount a deferred setup-scope Payment Element: no intent/clientSecret up
+                 * front; the SetupIntent is created and confirmed server-side from a
+                 * ConfirmationToken at save (Luma vault-form parity).
+                 */
+                initPaymentElement(generation) {
+                    this.stripe = this.stripe || Stripe(this.config.publicKey);
+
+                    this.elements = this.stripe.elements({
+                        mode: 'setup',
+                        currency: this.config.currency,
+                        paymentMethodCreation: 'manual',
+                        appearance: {
+                            theme: this.config.elementsTheme || 'stripe',
+                            variables: (!!this.config.fieldStyle && this.config.fieldStyle.constructor === Object)
+                                       ? this.config.fieldStyle
+                                       : {}
+                        }
+                    });
+
+                    this.paymentElement = this.elements.create(
+                        'payment',
+                        {
+                            layout: {
+                                type: 'accordion',
+                                defaultCollapsed: false,
+                                radios: 'if_multiple',
+                                spacedAccordionItems: false
+                            },
+                            wallets: {
+                                applePay: 'never',
+                                googlePay: 'never',
+                                link: 'never'
+                            },
+                            fields: {
+                                billingDetails: {
+                                    name: 'never',
+                                    phone: 'never',
+                                    address: {
+                                        line1: 'never',
+                                        line2: 'never',
+                                        city: 'never',
+                                        state: 'never',
+                                        country: 'never',
+                                        postalCode: 'never'
+                                    }
+                                }
+                            }
+                        }
+                    );
+
+                    this.paymentElement.on('ready', () => {
+                        if (generation === this._generation) {
+                            this.loading = false;
+                            this._inFlight = false;
+                            this._mountFailures = 0;
+                        }
+                    });
+                    this.paymentElement.on('loaderror', event => {
+                        if (generation === this._generation) {
+                            this.handleMountError(
+                                event && event.error && event.error.message ? event.error.message : null
+                            );
+                        }
+                    });
+                    this.paymentElement.on('change', event => {
+                        if (generation !== this._generation) {
+                            return;
+                        }
+
+                        this.errorMessage = event.error ? event.error.message : '';
+                        this.ready = event.complete;
+                    });
+
+                    this.paymentElement.mount('#<?= /* @noEscape */ $code ?>-cc');
+                },
+
+                handleMountError(message) {
+                    this._mountFailures++;
+                    this._inFlight = false;
+                    this.loading = false;
+
+                    this.destroyElement();
+
+                    if (this._mountFailures >= MAX_MOUNT_FAILURES) {
+                        this.showError('<?= /* @noEscape */ $tLoadFailed ?>');
+
+                        return;
+                    }
+
+                    this.showError(message || '<?= /* @noEscape */ $tServerError ?>');
+                },
+
+                /**
+                 * Validate the Element, mint a single-use ConfirmationToken with billing details
+                 * from the confirmed address step, and confirm the SetupIntent server-side.
+                 */
+                save() {
+                    if (this.saving) {
+                        return;
+                    }
+
+                    if (!this.stripe || !this.elements) {
+                        this.showError('<?= /* @noEscape */ $tLoadFailed ?>');
+
+                        return;
+                    }
+
+                    this.saving = true;
+                    this.errorMessage = '';
+
+                    const generation = this._generation;
+
+                    this.elements.submit()
+                        .then(submitResult => {
+                            if (submitResult && submitResult.error) {
+                                throw submitResult.error;
+                            }
+
+                            return this.stripe.createConfirmationToken({
+                                elements: this.elements,
+                                params: {
+                                    payment_method_data: {
+                                        billing_details: this.buildBillingDetails()
+                                    }
+                                }
+                            });
+                        })
+                        .then(result => {
+                            if (result.error || !result.confirmationToken) {
+                                throw result.error || new Error('<?= /* @noEscape */ $tServerError ?>');
+                            }
+
+                            return this.confirmVaultSetup(result.confirmationToken.id);
+                        })
+                        .catch(error => {
+                            if (generation === this._generation) {
+                                this.handleSaveError(error && error.message ? error.message : null);
+                            }
+                        });
+                },
+
+                /**
+                 * Compile Stripe billing_details from the scaffold's confirmed billing[] fields;
+                 * same source and shape as the Luma widget's address option mapping.
+                 */
+                buildBillingDetails() {
+                    const form = this.getForm();
+                    const value = name => {
+                        const el = form.querySelector('[name="' + name + '"]');
+
+                        return el && !el.disabled ? el.value : '';
+                    };
+                    const streets = Array.from(form.querySelectorAll('[name="billing[street][]"]'))
+                        .map(el => el.value);
+
+                    let region = value('billing[region]');
+                    const regionSelect = form.querySelector('select[name="billing[region_id]"]');
+
+                    if (!region && regionSelect && regionSelect.selectedIndex > 0) {
+                        region = regionSelect.options[regionSelect.selectedIndex].text;
+                    }
+
+                    return {
+                        name: [value('billing[firstname]'), value('billing[lastname]')].filter(Boolean).join(' '),
+                        phone: value('billing[telephone]'),
+                        address: {
+                            line1: streets[0] || '',
+                            line2: streets[1] || '',
+                            city: value('billing[city]'),
+                            state: region,
+                            postal_code: value('billing[postcode]'),
+                            country: value('billing[country_id]')
+                        }
+                    };
+                },
+
+                /**
+                 * POST a ConfirmationToken to the dedicated server-side SetupIntent confirm
+                 * endpoint (NOT the form save), to establish the off-session vault mandate.
+                 */
+                confirmVaultSetup(confirmationTokenId) {
+                    return this.postConfirm({token: confirmationTokenId, mode: 'setup'})
+                        .then(this.handleVaultConfirmResponse.bind(this));
+                },
+
+                postConfirm(params) {
+                    const body = new URLSearchParams(params);
+                    body.set('form_key', this.getForm().querySelector('input[name="form_key"]').value);
+
+                    return fetch(this.config.confirmUrl, {
+                        method: 'POST',
+                        headers: {'X-Requested-With': 'XMLHttpRequest'},
+                        body: body,
+                    }).then(response => response.json().then(data => {
+                        if (!response.ok) {
+                            throw new Error(
+                                data && data.message ? data.message : '<?= /* @noEscape */ $tServerError ?>'
+                            );
+                        }
+
+                        return data;
+                    }));
+                },
+
+                /**
+                 * Handle the confirm endpoint response: succeeded, 3DS required, or error.
+                 */
+                handleVaultConfirmResponse(response) {
+                    if (response.status === 'ok' && response.paymentToken) {
+                        this.completeVaultSave(response.paymentToken);
+
+                        return;
+                    }
+
+                    if (response.status === 'requires_action' && response.clientSecret) {
+                        return this.stripe.handleNextAction({
+                            clientSecret: response.clientSecret
+                        }).then(result => this.handleVaultNextAction(response.intentId, result));
+                    }
+
+                    throw new Error(
+                        response && response.message ? response.message : '<?= /* @noEscape */ $tServerError ?>'
+                    );
+                },
+
+                /**
+                 * After handleNextAction (3DS), re-check the SetupIntent server-side before saving.
+                 */
+                handleVaultNextAction(intentId, result) {
+                    if (result.error) {
+                        throw new Error(
+                            result.error.message ? result.error.message : '<?= /* @noEscape */ $tServerError ?>'
+                        );
+                    }
+
+                    return this.postConfirm({
+                        action: 'finalize',
+                        mode: 'setup',
+                        intent: result.setupIntent ? result.setupIntent.id : intentId,
+                    }).then(response => {
+                        if (response.status === 'ok' && response.paymentToken) {
+                            this.completeVaultSave(response.paymentToken);
+
+                            return;
+                        }
+
+                        throw new Error(
+                            response && response.message ? response.message : '<?= /* @noEscape */ $tServerError ?>'
+                        );
+                    });
+                },
+
+                /**
+                 * The mandate is established: write the confirmed SetupIntent id into
+                 * payment[token] and submit to the TokenBase save controller. The scaffold's
+                 * hidden 'id' field carries the card hash on edit (empty on add), so the
+                 * controller updates the right card (Luma parity).
+                 */
+                completeVaultSave(paymentToken) {
+                    const form = this.getForm();
+                    form.querySelector('[name="payment[token]"]').value = paymentToken;
+
+                    form.submit();
+                },
+
+                handleSaveError(message) {
+                    this.saving = false;
+
+                    this.showError(message || '<?= /* @noEscape */ $tServerError ?>');
+                },
+
+                destroyElement() {
+                    if (this.paymentElement) {
+                        this.paymentElement.destroy();
+                        this.paymentElement = null;
+                    }
+
+                    this.elements = null;
+                    this.ready = false;
+                },
+
+                showError(message) {
+                    this.errorMessage = message;
+
+                    if (typeof window.dispatchMessages === 'function') {
+                        window.dispatchMessages([{type: 'error', text: message}], 5000);
+                    }
+                },
+            }));
+        }, {once: true});
+    })();
+</script>
+<?php if (isset($hyvaCsp)): ?>
+    <?php $hyvaCsp->registerInlineScript() ?>
+<?php endif; ?>

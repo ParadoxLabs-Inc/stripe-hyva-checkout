@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <!-- Hyva theme: swap the Luma per-method paymentinfo templates for the shared
+             TokenBaseHyvaCheckout ones, and attach the Payment Element payment pane. -->
+        <referenceBlock name="tokenbase_manage_paradoxlabs_stripe" template="ParadoxLabs_TokenBaseHyvaCheckout::customer/method.phtml"/>
+        <referenceBlock name="tokenbase_manage_paradoxlabs_stripe_cards" template="ParadoxLabs_TokenBaseHyvaCheckout::customer/cards.phtml"/>
+        <referenceBlock name="tokenbase_manage_paradoxlabs_stripe_form" template="ParadoxLabs_TokenBaseHyvaCheckout::customer/form.phtml">
+            <block class="Magento\Framework\View\Element\Template" name="tokenbase_manage_paradoxlabs_stripe_form_pane" as="payment_pane" template="ParadoxLabs_StripeHyvaCheckout::customer/form/cc.phtml"/>
+        </referenceBlock>
+    </body>
+</page>
