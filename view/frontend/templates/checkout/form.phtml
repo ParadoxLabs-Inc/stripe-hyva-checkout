@@ -43,7 +43,11 @@ if (empty($config['publicKey'])) {
 >
     <?php if ($image): ?>
         <div class="flex justify-end mb-2">
-            <img src="<?= $escaper->escapeHtmlAttr($image); ?>" alt="<?= $escaper->escapeHtmlAttr($method->getTitle()) ?>" />
+            <!-- The Stripe badge SVGs carry only a viewBox; without dimensions the img stretches to fill the row. -->
+            <img src="<?= $escaper->escapeHtmlAttr($image); ?>"
+                 alt="<?= $escaper->escapeHtmlAttr($method->getTitle()) ?>"
+                 width="150"
+                 height="34" />
         </div>
     <?php endif; ?>
 
