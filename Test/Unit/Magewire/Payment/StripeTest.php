@@ -164,6 +164,79 @@ class StripeTest extends TestCase
     }
 
     /**
+     * loadNextAction tests
+     *
+     * Magewire 1.x discards method return values, so the browser can only receive the
+     * next-action (or quote data) through a dispatched browser event.
+     */
+
+    public function testLoadNextActionDispatchesChallengeDataAsBrowserEvent(): void
+    {
+        $this->stashIntent('pi_123', 'pi_123_secret_456');
+        $this->helper->method('getCurrentStoreId')->willReturn('2');
+
+        $this->intents->method('getIntent')
+            ->willReturn(PaymentIntent::constructFrom([
+                'id' => 'pi_123',
+                'status' => 'requires_action',
+            ]));
+
+        $this->component->loadNextAction();
+
+        $this->assertSame(
+            [
+                [
+                    'event' => 'paradoxlabs_stripeNextAction',
+                    'data' => [
+                        'client_secret' => 'pi_123_secret_456',
+                        'intent_id' => 'pi_123',
+                    ],
+                ],
+            ],
+            $this->component->getBrowserEvents()
+        );
+    }
+
+    public function testLoadNextActionDispatchesEmptyEventWhenNothingPending(): void
+    {
+        $this->payment->method('getAdditionalInformation')->willReturn(null);
+
+        $this->component->loadNextAction();
+
+        $this->assertSame(
+            [
+                [
+                    'event' => 'paradoxlabs_stripeNextAction',
+                    'data' => [],
+                ],
+            ],
+            $this->component->getBrowserEvents()
+        );
+    }
+
+    /**
+     * refreshQuoteData tests
+     */
+
+    public function testRefreshQuoteDataDispatchesBillingDetailsAsBrowserEvent(): void
+    {
+        $this->quote->method('getData')->willReturnMap([
+            ['base_grand_total', null, 30.0],
+            ['base_currency_code', null, 'USD'],
+        ]);
+        $this->quote->method('getBillingAddress')->willReturn($this->buildBillingAddress());
+        $this->helper->method('formatCurrencyAmount')->willReturn(3000);
+
+        $this->component->refreshQuoteData();
+
+        $events = $this->component->getBrowserEvents();
+
+        $this->assertCount(1, $events);
+        $this->assertSame('paradoxlabs_stripeQuoteUpdated', $events[0]['event']);
+        $this->assertSame('Jamie Doe', $events[0]['data']['billingDetails']['name']);
+    }
+
+    /**
      * getQuoteData tests
      */
 

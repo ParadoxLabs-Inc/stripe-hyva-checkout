@@ -50,6 +50,8 @@ $inlineScript = <<<JS
             token: '',
             config: {},
             billingDetails: {},
+            quoteData: {},
+            nextAction: null,
             payment: {
                 method: '{$code}',
                 card_id: '',
@@ -94,6 +96,11 @@ $inlineScript = <<<JS
                 listeners.quoteUpdated = this.handleQuoteUpdated.bind(this);
                 document.addEventListener('{$code}QuoteUpdated', listeners.quoteUpdated);
                 window.addEventListener('{$code}QuoteUpdated', listeners.quoteUpdated);
+
+                // Pending 3DS next-action pushed by the Magewire component on request.
+                window.removeEventListener('{$code}NextAction', listeners.nextAction);
+                listeners.nextAction = this.handleNextActionEvent.bind(this);
+                window.addEventListener('{$code}NextAction', listeners.nextAction);
 
                 this.loadStripeJs();
 
@@ -183,13 +190,19 @@ $inlineScript = <<<JS
                 this.paymentElement.on('change', this.handleStripeChange.bind(this));
 
                 // Billing details are attached at tokenization from server-side quote data.
-                this.\$wire.getQuoteData().then(this.applyQuoteData.bind(this));
+                // Magewire 1.x does not return method results to the browser; the component
+                // pushes quote data back via the QuoteUpdated browser event instead.
+                this.\$wire.call('refreshQuoteData');
             },
             handleStripeChange: function(event) {
                 this.error.general = event.error ? event.error.message : '';
             },
             handleQuoteUpdated: function(event) {
-                this.applyQuoteData(event.detail || {});
+                this.quoteData = event.detail || {};
+                this.applyQuoteData(this.quoteData);
+            },
+            handleNextActionEvent: function(event) {
+                this.nextAction = event.detail || null;
             },
             applyQuoteData: function(data, force) {
                 if (!data || typeof data !== 'object') {
@@ -233,9 +246,10 @@ $inlineScript = <<<JS
                 // Refresh quote data (amount + billing details) so the ConfirmationToken is minted
                 // against current values, then validate the Element and tokenize. Wallet payments
                 // (Apple/Google Pay, Link) collected by the Payment Element flow through here too.
-                this.\$wire.getQuoteData()
-                    .then(data => {
-                        this.applyQuoteData(data, true);
+                // The QuoteUpdated browser event fires before this call's promise settles.
+                this.\$wire.call('refreshQuoteData')
+                    .then(() => {
+                        this.applyQuoteData(this.quoteData, true);
 
                         return this.elements.submit();
                     })
@@ -308,9 +322,15 @@ $inlineScript = <<<JS
                 // failed attempt left an intent awaiting action (verified against Stripe, so a
                 // plain decline can never misfire the challenge UI).
                 this.handlingNextAction = true;
+                this.nextAction = null;
 
-                this.\$wire.getNextAction()
-                    .then(this.runNextAction.bind(this))
+                // The NextAction browser event fires before this call's promise settles.
+                this.\$wire.call('loadNextAction')
+                    .then(() => {
+                        const nextAction = this.nextAction;
+                        this.nextAction = null;
+                        this.runNextAction(nextAction);
+                    })
                     .catch(() => {
                         this.handlingNextAction = false;
                     });

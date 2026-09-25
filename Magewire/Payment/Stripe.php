@@ -210,6 +210,17 @@ class Stripe extends Form implements EvaluationInterface
     }
 
     /**
+     * Push any pending 3DS next-action to the browser.
+     *
+     * Magewire 1.x discards method return values, so the result of getNextAction() is delivered
+     * as a browser event (empty detail when nothing is pending) rather than returned.
+     */
+    public function loadNextAction(): void
+    {
+        $this->dispatchBrowserEvent(static::METHOD_CODE . 'NextAction', $this->getNextAction() ?? []);
+    }
+
+    /**
      * Check for a pending 3DS next-action after a failed place-order attempt.
      *
      * On requires_action, StashNextActionPlugin persists the intent id/client_secret from the
