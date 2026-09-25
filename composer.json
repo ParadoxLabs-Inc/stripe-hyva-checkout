@@ -18,7 +18,7 @@
     "type": "magento2-module",
     "version": "1.0.0",
     "time": "2026-09-15",
-    "license": "Apache-2.0",
+    "license": "proprietary",
     "authors": [
         {
             "name": "Ryan Hoerr",
