@@ -89,7 +89,7 @@ endif;
     <div class="mt-4">
         <button type="button"
                 class="btn btn-primary"
-                :disabled="!ready || saving"
+                :disabled="isSaveDisabled"
                 @click="save"
         >
             <?= $escaper->escapeHtml(__('Save')) ?>
@@ -514,6 +514,9 @@ endif;
                         window.dispatchMessages([{type: 'error', text: message}], 5000);
                     }
                 },
+
+                /* Getters for template bindings */
+                isSaveDisabled() {return !this.ready || this.saving;},
             }));
         }, {once: true});
     })();
