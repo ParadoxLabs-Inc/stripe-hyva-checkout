@@ -1,22 +1,14 @@
 <?php declare(strict_types=1);
 /**
- * Copyright © 2023-present ParadoxLabs, Inc.
+ * Paradox Labs, Inc.
+ * http://www.paradoxlabs.com
+ * 717-431-3330
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Need help? Open a ticket in our support system:
+ *  http://support.paradoxlabs.com
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * Need help? Try our knowledgebase and support system:
- *
- * @link https://support.paradoxlabs.com
+ * @author      Ryan Hoerr <info@paradoxlabs.com>
+ * @license     http://store.paradoxlabs.com/license.html
  */
 
 use Magento\Framework\Escaper;
@@ -58,6 +50,8 @@ $inlineScript = <<<JS
             token: '',
             config: {},
             billingDetails: {},
+            quoteData: {},
+            nextAction: null,
             payment: {
                 method: '{$code}',
                 card_id: '',
@@ -102,6 +96,11 @@ $inlineScript = <<<JS
                 listeners.quoteUpdated = this.handleQuoteUpdated.bind(this);
                 document.addEventListener('{$code}QuoteUpdated', listeners.quoteUpdated);
                 window.addEventListener('{$code}QuoteUpdated', listeners.quoteUpdated);
+
+                // Pending 3DS next-action pushed by the Magewire component on request.
+                window.removeEventListener('{$code}NextAction', listeners.nextAction);
+                listeners.nextAction = this.handleNextActionEvent.bind(this);
+                window.addEventListener('{$code}NextAction', listeners.nextAction);
 
                 this.loadStripeJs();
 
@@ -191,13 +190,19 @@ $inlineScript = <<<JS
                 this.paymentElement.on('change', this.handleStripeChange.bind(this));
 
                 // Billing details are attached at tokenization from server-side quote data.
-                this.\$wire.getQuoteData().then(this.applyQuoteData.bind(this));
+                // Magewire 1.x does not return method results to the browser; the component
+                // pushes quote data back via the QuoteUpdated browser event instead.
+                this.\$wire.call('refreshQuoteData');
             },
             handleStripeChange: function(event) {
                 this.error.general = event.error ? event.error.message : '';
             },
             handleQuoteUpdated: function(event) {
-                this.applyQuoteData(event.detail || {});
+                this.quoteData = event.detail || {};
+                this.applyQuoteData(this.quoteData);
+            },
+            handleNextActionEvent: function(event) {
+                this.nextAction = event.detail || null;
             },
             applyQuoteData: function(data, force) {
                 if (!data || typeof data !== 'object') {
@@ -241,9 +246,10 @@ $inlineScript = <<<JS
                 // Refresh quote data (amount + billing details) so the ConfirmationToken is minted
                 // against current values, then validate the Element and tokenize. Wallet payments
                 // (Apple/Google Pay, Link) collected by the Payment Element flow through here too.
-                this.\$wire.getQuoteData()
-                    .then(data => {
-                        this.applyQuoteData(data, true);
+                // The QuoteUpdated browser event fires before this call's promise settles.
+                this.\$wire.call('refreshQuoteData')
+                    .then(() => {
+                        this.applyQuoteData(this.quoteData, true);
 
                         return this.elements.submit();
                     })
@@ -316,9 +322,15 @@ $inlineScript = <<<JS
                 // failed attempt left an intent awaiting action (verified against Stripe, so a
                 // plain decline can never misfire the challenge UI).
                 this.handlingNextAction = true;
+                this.nextAction = null;
 
-                this.\$wire.getNextAction()
-                    .then(this.runNextAction.bind(this))
+                // The NextAction browser event fires before this call's promise settles.
+                this.\$wire.call('loadNextAction')
+                    .then(() => {
+                        const nextAction = this.nextAction;
+                        this.nextAction = null;
+                        this.runNextAction(nextAction);
+                    })
                     .catch(() => {
                         this.handlingNextAction = false;
                     });

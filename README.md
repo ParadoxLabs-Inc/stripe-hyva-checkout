@@ -1,13 +1,9 @@
-[![Latest Stable Version](https://poser.pugx.org/paradoxlabs/stripe-hyva-checkout/v/stable)](https://packagist.org/packages/paradoxlabs/stripe-hyva-checkout)
-[![License](https://poser.pugx.org/paradoxlabs/stripe-hyva-checkout/license)](https://packagist.org/packages/paradoxlabs/stripe-hyva-checkout)
-[![Total Downloads](https://poser.pugx.org/paradoxlabs/stripe-hyva-checkout/downloads)](https://packagist.org/packages/paradoxlabs/stripe-hyva-checkout)
-
 <p align="center">
     <a href="https://www.paradoxlabs.com"><img alt="ParadoxLabs" src="https://paradoxlabs.com/wp-content/uploads/2020/02/pl-logo-canva-2.png" width="250"></a>
 </p>
 
 This module adds support for Hyva Checkout to
-our [Stripe payment method for Magento 2](https://github.com/ParadoxLabs-Inc/stripe).
+our Stripe payment method for Magento 2.
 
 Requirements
 ============
@@ -18,6 +14,7 @@ Requirements
 * `hyva-themes/magento2-theme-module` >= 1.3.11
 * `hyva-themes/magento2-payment-icons` >= 2.0
 * `paradoxlabs/stripe` ^5.0
+* `paradoxlabs/tokenbase-hyva-checkout` ^1.0 (shared Hyva payment-options scaffold)
 
 Features
 ========
@@ -29,6 +26,8 @@ Features
   confirmed server-side at place order
 * Supports stored cards (vault) via ParadoxLabs_TokenBase
 * Handles 3D Secure authentication inline during place order, without leaving the checkout page
+* Customer-account "My Payment Options" (paymentinfo) card management on Hyva themes: card list, delete, and
+  add/edit via the shared `ParadoxLabs_TokenBaseHyvaCheckout` scaffold
 * Strict CSP and Alpine CSP compliant, for Hyva Checkout 1.3+ nonce-based CSP
 
 Installation and Usage
@@ -59,7 +58,8 @@ Place-order failures are handled inside `Magewire\Payment\PlaceOrderService` rat
 rethrown. Hyva's default `AbstractPlaceOrderService::handleException()` rethrows the exception, which
 aborts the Magewire request before the `order:place:paradoxlabs_stripe:error` browser event the
 processor queued can reach the response. That event is what drives this module's inline 3-D Secure
-recovery (`scripts.phtml`: `getNextAction()` → `stripe.handleNextAction()` → re-place) and the
+recovery (`scripts.phtml`: `loadNextAction()` → `paradoxlabs_stripeNextAction` browser event →
+`stripe.handleNextAction()` → re-place) and the
 single-use ConfirmationToken scrub — so with the default rethrow, neither ever runs, and in
 production the customer only sees a generic "page refresh" dialog.
 
@@ -83,53 +83,29 @@ failure result (no success, no redirect) so the event-driven recovery still runs
 verbatim/masked policy above.
 
 The `order:place:paradoxlabs_stripe:error` listener also fires for ordinary declines (no
-next-action): `getNextAction()` returns null and the listener resets without a second message.
+next-action): `loadNextAction()` dispatches an empty event and the listener resets without a second
+message.
 
-Known Limitations (TODO)
-========================
+Known Limitations
+=================
 
-Pre-release caveats — verify before relying on these in production:
-
-* **TODO: Live install verification.** This module has not yet been exercised against a running Hyva Checkout
-  install. Two assumptions need confirmation there: Magewire `$wire` action return values resolving through the
-  call promise (standard Livewire v2 semantics), and `dispatchBrowserEvent` delivery (the template defensively
-  listens on both `window` and `document`).
-* **TODO: Browser QA of the 3D Secure and wallet matrix** (challenge, challenge-abandoned, decline-after-challenge;
-  Apple Pay / Google Pay / Link).
-* **TODO: Card management on Hyva customer account pages.** The Luma-based TokenBase card-management link is removed
-  from the Hyva account navigation; there is no Hyva-native replacement yet.
 * A $0 quote with `payment_action` not set to `order` will not render the Element (`mode: 'payment'` requires a
   positive amount). This matches the Luma renderer's behavior.
 
 Changelog
 =========
 
-Please see [CHANGELOG.md](https://github.com/ParadoxLabs-Inc/stripe-hyva-checkout/blob/master/CHANGELOG.md).
+Please see [CHANGELOG.md](CHANGELOG.md).
 
 Support
 =======
 
-This module is provided free and without support of any kind. You may report issues you've found in the module, and we
-will address them as we are able, but **no support will be provided here.**
-
-**DO NOT include any API keys, credentials, or customer-identifying in issues, pull requests, or comments. Any
-personally identifying information will be deleted on sight.**
-
-If you need personal support services,
-please [buy an extension support plan from ParadoxLabs](https://store.paradoxlabs.com/support-renewal.html), then open a
-ticket at [support.paradoxlabs.com](https://support.paradoxlabs.com).
-
-Contributing
-============
-
-Please feel free to submit pull requests with any contributions. We welcome and appreciate your support, and will
-acknowledge contributors.
-
-This module is maintained by ParadoxLabs, a Magento solutions provider. We make no guarantee of accepting contributions,
-especially any that introduce architectural changes.
+This module is covered by your ParadoxLabs extension support plan. If you need help, open a ticket at
+[support.paradoxlabs.com](https://support.paradoxlabs.com). To renew support,
+[buy an extension support plan from ParadoxLabs](https://store.paradoxlabs.com/support-renewal.html).
 
 License
 =======
 
-This module is licensed
-under [APACHE LICENSE, VERSION 2.0](https://github.com/ParadoxLabs-Inc/stripe/blob/master/LICENSE).
+This module is proprietary software, licensed under the
+[ParadoxLabs software license](https://store.paradoxlabs.com/license.html). See license.txt.
