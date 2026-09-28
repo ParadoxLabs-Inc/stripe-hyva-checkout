@@ -1,3 +1,7 @@
+[![Latest Stable Version](https://poser.pugx.org/paradoxlabs/stripe-hyva-checkout/v/stable)](https://packagist.org/packages/paradoxlabs/stripe-hyva-checkout)
+[![License](https://poser.pugx.org/paradoxlabs/stripe-hyva-checkout/license)](https://packagist.org/packages/paradoxlabs/stripe-hyva-checkout)
+[![Total Downloads](https://poser.pugx.org/paradoxlabs/stripe-hyva-checkout/downloads)](https://packagist.org/packages/paradoxlabs/stripe-hyva-checkout)
+
 <p align="center">
     <a href="https://www.paradoxlabs.com"><img alt="ParadoxLabs" src="https://paradoxlabs.com/wp-content/uploads/2020/02/pl-logo-canva-2.png" width="250"></a>
 </p>
