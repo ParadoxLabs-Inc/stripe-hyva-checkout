@@ -9,10 +9,14 @@
 This module adds support for Hyva Checkout to
 our Stripe payment method for Magento 2.
 
+> **Requires a paid ParadoxLabs extension.** This module only adds Hyva Checkout support; it does nothing on
+> its own. You must also have our [Stripe Payments with Stored Cards for Magento 2](https://paradoxlabs.com/magento2-stripe-payment-module.html)
+> extension (`paradoxlabs/stripe`), purchased separately.
+
 Requirements
 ============
 
-* Adobe Commerce / Magento Open Source 2.4.6 – 2.4.9 (or equivalent version of Adobe Commerce Cloud), or Mage-OS 2.0 – 3.0
+* Adobe Commerce / Magento Open Source 2.4.6 – 2.4.9 (or equivalent version of Adobe Commerce Cloud), or Mage-OS 2+
 * PHP 8.1, 8.2, 8.3, 8.4, or 8.5
 * Hyva Checkout (separate product and license), `hyva-themes/magento2-hyva-checkout` >= 1.3
 * `hyva-themes/magento2-theme-module` >= 1.3.11
