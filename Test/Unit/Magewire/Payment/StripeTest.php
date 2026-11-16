@@ -251,6 +251,20 @@ class StripeTest extends TestCase
     }
 
     /**
+     * refreshQuoteData is a listener: Magewire 3 passes the event payload as named arguments
+     * (billing_address_activated sends `id:`), Magewire 1 as positional ones.
+     */
+    public function testRefreshQuoteDataAcceptsListenerPayloadsOfBothMagewireVersions(): void
+    {
+        $this->quote->method('getBillingAddress')->willReturn($this->buildBillingAddress());
+
+        $this->component->refreshQuoteData(id: 5);
+        $this->component->refreshQuoteData(['id' => 5]);
+
+        $this->assertCount(2, $this->browserEvents);
+    }
+
+    /**
      * getQuoteData tests
      */
 

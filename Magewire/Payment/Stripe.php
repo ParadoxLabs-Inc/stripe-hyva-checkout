@@ -23,6 +23,7 @@ use Magento\Payment\Model\MethodInterface;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\Data\CartInterface;
 use Magewirephp\Magewire\Component\Form;
+use Magewirephp\Magewire\Features\SupportMagewireBackwardsCompatibility\HandleBackwardsCompatibility;
 use ParadoxLabs\Stripe\Helper\Data;
 use ParadoxLabs\Stripe\Model\Service\Intents;
 use ParadoxLabs\StripeHyvaCheckout\ViewModel\PaymentForm;
@@ -40,7 +41,10 @@ use Throwable;
  * the stored-card list, the place-order evaluation, and the server-side quote data the client
  * needs at tokenization time (amount, currency, billing details), plus 3DS next-action recovery
  * after a requires_action place-order failure.
+ *
+ * Native Magewire 3 on Hyva Checkout 3.x, with or without v1bc; Magewire 1 (Checkout 1.x) ignores the attribute.
  */
+#[HandleBackwardsCompatibility(enabled: false)]
 class Stripe extends Form implements EvaluationInterface
 {
     protected const METHOD_CODE = 'paradoxlabs_stripe';
@@ -145,10 +149,12 @@ class Stripe extends Form implements EvaluationInterface
      * Push fresh quote data (amount, currency, billing details) to the browser, so the Payment
      * Element and wallet sheet stay in sync with the quote.
      *
+     * @param mixed ...$eventData Listener payload, unused: positional on Magewire 1, named on Magewire 3.
      * @throws LocalizedException
      * @throws NoSuchEntityException
+     * @SuppressWarnings(PHPMD.UnusedFormalParameter)
      */
-    public function refreshQuoteData(): void
+    public function refreshQuoteData(mixed ...$eventData): void
     {
         $this->dispatchBrowserEvent(static::METHOD_CODE . 'QuoteUpdated', $this->getQuoteData());
     }

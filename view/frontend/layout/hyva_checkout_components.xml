@@ -18,12 +18,5 @@
                 </arguments>
             </block>
         </referenceBlock>
-        <referenceContainer name="magewire.plugin.scripts">
-            <block class="ParadoxLabs\StripeHyvaCheckout\Block\CheckoutTemplate" name="script-paradoxlabs_stripe" template="ParadoxLabs_StripeHyvaCheckout::checkout/scripts.phtml" ifconfig="payment/paradoxlabs_stripe/active">
-                <arguments>
-                    <argument name="method_code" xsi:type="string">paradoxlabs_stripe</argument>
-                </arguments>
-            </block>
-        </referenceContainer>
     </body>
 </page>

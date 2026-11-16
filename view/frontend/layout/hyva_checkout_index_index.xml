@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <!-- Payment JS: rendered with the checkout API on Hyva Checkout 1.3.6+ and 3.x, with or without v1bc. -->
+        <referenceContainer name="hyva.checkout.api-v1.payment-methods">
+            <block class="ParadoxLabs\StripeHyvaCheckout\Block\CheckoutTemplate" name="script-paradoxlabs_stripe" template="ParadoxLabs_StripeHyvaCheckout::checkout/scripts.phtml" ifconfig="payment/paradoxlabs_stripe/active">
+                <arguments>
+                    <argument name="method_code" xsi:type="string">paradoxlabs_stripe</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+    </body>
+</page>

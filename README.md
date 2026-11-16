@@ -18,9 +18,7 @@ Requirements
 
 * Adobe Commerce / Magento Open Source 2.4.6 – 2.4.9 (or equivalent version of Adobe Commerce Cloud), or Mage-OS 2+
 * PHP 8.1, 8.2, 8.3, 8.4, or 8.5
-* Hyva Checkout (separate product and license), `hyva-themes/magento2-hyva-checkout` 1.3.x, or 3.0.1 and later
-  * On Hyvä Checkout 3.x, the `Hyva_CheckoutV1bc` compatibility module (installed and enabled with Checkout 3.x)
-    must stay enabled.
+* Hyva Checkout (separate product and license), `hyva-themes/magento2-hyva-checkout` 1.3.6 or later 1.3.x, or 3.0.1 and later
 * `hyva-themes/magento2-theme-module` >= 1.3.11
 * `hyva-themes/magento2-payment-icons` >= 2.0
 * `paradoxlabs/stripe` ^5.0
