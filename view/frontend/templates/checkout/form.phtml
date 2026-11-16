@@ -31,16 +31,22 @@ $method = $formBlock->getMethod();
 $config = $block->getConfig();
 $image = $config['logoImage'] ?? false;
 
-// Method active but unavailable (e.g. currency restriction): config is empty; render nothing.
-if (empty($config['publicKey'])) {
-    return;
-}
+// Method active but unavailable (e.g. currency restriction): config is empty. Magewire requires one root tag
+// outside any condition, so always emit it and branch inside; an early return breaks the payment step.
+$available = !empty($config['publicKey']);
 ?>
 <div class="<?= /* @noEscape */ $code ?>"
+    <?php if ($available): ?>
      x-data="<?= /* @noEscape */ $code ?>PaymentForm"
      x-init="initForm"
      data-config='<?= $escaper->escapeJsQuote(json_encode($config)) ?>'
+    <?php endif; ?>
 >
+    <?php if (!$available): ?>
+    <p class="text-secondary text-sm">
+        <?= $escaper->escapeHtml(__('This payment method is currently unavailable. Please choose another.')) ?>
+    </p>
+    <?php else: ?>
     <?php if ($image): ?>
         <div class="flex justify-end mb-2">
             <!-- The Stripe badge SVGs carry only a viewBox; without dimensions the img stretches to fill the row. -->
@@ -115,4 +121,5 @@ if (empty($config['publicKey'])) {
     <?php endif; ?>
 
     <?= /* @noEscape */ $block->getChildHtml(); ?>
+    <?php endif; ?>
 </div>

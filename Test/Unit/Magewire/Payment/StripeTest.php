@@ -36,6 +36,7 @@ class StripeTest extends TestCase
     private Intents|MockObject $intents;
     private Quote|MockObject $quote;
     private QuotePayment|MockObject $payment;
+    private array $browserEvents = [];
 
     protected function setUp(): void
     {
@@ -56,14 +57,27 @@ class StripeTest extends TestCase
         $this->quote->method('getPayment')->willReturn($this->payment);
         $this->checkoutSession->method('getQuote')->willReturn($this->quote);
 
-        $this->component = new Stripe(
-            new Validator(),
-            $this->checkoutSession,
-            $this->cardRepository,
-            $this->quoteRepository,
-            $this->helper,
-            $this->intents,
-            $this->createMock(PaymentForm::class),
+        // Capture browser events at dispatchBrowserEvent(): Magewire 1 queues them on the component, while
+        // Magewire 3 (Hyva Checkout 3.x) routes them through its global store, which needs the ObjectManager.
+        $this->component = $this->getMockBuilder(Stripe::class)
+            ->setConstructorArgs([
+                new Validator(),
+                $this->checkoutSession,
+                $this->cardRepository,
+                $this->quoteRepository,
+                $this->helper,
+                $this->intents,
+                $this->createMock(PaymentForm::class),
+            ])
+            ->onlyMethods(['dispatchBrowserEvent'])
+            ->getMock();
+        $this->component->method('dispatchBrowserEvent')->willReturnCallback(
+            function (string $event, $data = null): void {
+                $this->browserEvents[] = [
+                    'event' => $event,
+                    'data' => $data,
+                ];
+            }
         );
     }
 
@@ -193,7 +207,7 @@ class StripeTest extends TestCase
                     ],
                 ],
             ],
-            $this->component->getBrowserEvents()
+            $this->browserEvents
         );
     }
 
@@ -210,7 +224,7 @@ class StripeTest extends TestCase
                     'data' => [],
                 ],
             ],
-            $this->component->getBrowserEvents()
+            $this->browserEvents
         );
     }
 
@@ -229,7 +243,7 @@ class StripeTest extends TestCase
 
         $this->component->refreshQuoteData();
 
-        $events = $this->component->getBrowserEvents();
+        $events = $this->browserEvents;
 
         $this->assertCount(1, $events);
         $this->assertSame('paradoxlabs_stripeQuoteUpdated', $events[0]['event']);
