@@ -1,6 +1,6 @@
 # ParadoxLabs_StripeHyvaCheckout Changelog
 
-## 1.1.0 - Nov 16, 2026
+## 1.1.0 - Nov 23, 2026
 
 - Added Hyvä Checkout 3.x support (3.0.1+), native to Magewire 3; Hyvä's v1bc module is not required.
 - Now requires Hyvä Checkout 1.3.6 or later on the 1.x line.
