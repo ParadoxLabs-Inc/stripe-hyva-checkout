@@ -1,5 +1,11 @@
 # ParadoxLabs_StripeHyvaCheckout Changelog
 
+## 1.1.1 - Nov 25, 2026
+
+- Fixed stored cards disappearing from the stored card list after saving a new or edited billing
+  address on Hyvä Checkout 3, leaving only "Add new card" until the next checkout update. The console showed
+  "Magewire entangle: property ['storedCards'] cannot be found on component ['checkout.payment.methods']".
+
 ## 1.1.0 - Nov 23, 2026
 
 - Added Hyvä Checkout 3.x support (3.0.1+), native to Magewire 3; Hyvä's v1bc module is not required.

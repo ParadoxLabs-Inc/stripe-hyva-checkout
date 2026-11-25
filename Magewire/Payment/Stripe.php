@@ -56,7 +56,6 @@ class Stripe extends Form implements EvaluationInterface
         = [
             'billing_address_activated' => 'Loading payment form',
             'billing_address_saved' => 'Loading payment form',
-            'billing_address_submitted' => 'Loading payment form',
         ];
 
     /**
@@ -64,13 +63,16 @@ class Stripe extends Form implements EvaluationInterface
      * Element amount from the quote totals; any billing change can shift both, so push fresh quote
      * data to the browser whenever the billing address changes.
      *
+     * Not billing_address_submitted: Hyvä always sends it alongside billing_address_saved, and
+     * listening to it queues this component ahead of checkout.payment.methods in the same update,
+     * whose re-render then replaces this component's root with a copy lacking wire:id (Magewire 3).
+     *
      * @var string[]
      */
     protected $listeners
         = [
             'billing_address_activated' => 'refreshQuoteData',
             'billing_address_saved' => 'refreshQuoteData',
-            'billing_address_submitted' => 'refreshQuoteData',
         ];
 
     /* Public component properties */
